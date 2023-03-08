@@ -26,7 +26,7 @@ dataset()
 
 driver()
 {  
-   python $DIR/docker/driver.py $ARGS;
+   python3 $DIR/docker/driver.py $ARGS;
 }
 
 case "$1" in

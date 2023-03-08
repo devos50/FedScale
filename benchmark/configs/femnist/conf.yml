@@ -23,7 +23,6 @@ auth:
 
 # cmd to run before we can indeed run FAR (in order)
 setup_commands:
-    - source $HOME/anaconda3/bin/activate fedscale
 
 # ========== Additional job configuration ========== 
 # Default parameters are specified in config_parser.py, wherein more description of the parameter can be found
