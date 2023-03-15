@@ -2,13 +2,13 @@
 
 # ========== Cluster configuration ========== 
 # ip address of the parameter server (need 1 GPU process)
-ps_ip: 10.0.0.1
+ps_ip: localhost
 
 # ip address of each worker:# of available gpus process on each gpu in this node
 # Note that if we collocate ps and worker on same GPU, then we need to decrease this number of available processes on that GPU by 1
 # E.g., master node has 4 available processes, then 1 for the ps, and worker should be set to: worker:3
 worker_ips: 
-    - 10.0.0.1:[2] # worker_ip: [(# processes on gpu) for gpu in available_gpus] eg. 10.0.0.2:[4,4,4,4] This node has 4 gpus, each gpu has 4 processes. 
+    - localhost:[2] # worker_ip: [(# processes on gpu) for gpu in available_gpus] eg. 10.0.0.2:[4,4,4,4] This node has 4 gpus, each gpu has 4 processes.
 
 exp_path: $FEDSCALE_HOME/fedscale/cloud
 
@@ -23,7 +23,7 @@ auth:
 
 # cmd to run before we can indeed run FAR (in order)
 setup_commands:
-    - source $HOME/anaconda3/bin/activate fedscale
+
 
 # ========== Additional job configuration ========== 
 # Default parameters are specified in config_parser.py, wherein more description of the parameter can be found
@@ -31,9 +31,10 @@ setup_commands:
 job_conf: 
     - job_name: cifar                   # Generate logs under this folder: log_path/job_name/time_stamp
     - log_path: $FEDSCALE_HOME/benchmark # Path of log files
+    - total_participants: 100
     - num_participants: 4                      # Number of participants per round, we use K=100 in our paper, large K will be much slower
     - data_set: cifar10                     # Dataset: openImg, google_speech, stackoverflow
-    - data_dir: $FEDSCALE_HOME/benchmark/dataset/data/    # Path of the dataset
+    - data_dir: /Users/mdevos/dfl-data    # Path of the dataset
     - model: shufflenet_v2_x2_0              # NOTE: Please refer to our model zoo README and use models for these small image (e.g., 32x32x3) inputs
 #    - model_zoo: fedscale-torch-zoo              # Default zoo (torchcv) uses the pytorchvision zoo, which can not support small images well
     - eval_interval: 5                     # How many rounds to run a testing on the testing set
@@ -46,3 +47,4 @@ job_conf:
     - test_bsz: 32
     - use_cuda: False
     - save_checkpoint: False
+    - parallel_sessions: 1
