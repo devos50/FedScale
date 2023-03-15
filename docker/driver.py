@@ -141,7 +141,6 @@ def process_cmd(yaml_file, local=False):
     time.sleep(10)
     # =========== Submit job to each worker ============
     rank_id = 1
-    worker_cmds = []
     for worker, gpu in zip(worker_ips, total_gpus):
         running_vms.add(worker)
 
@@ -150,6 +149,7 @@ def process_cmd(yaml_file, local=False):
 
         for cuda_id in range(len(gpu)):
             for _ in range(gpu[cuda_id]):
+                worker_cmds = []
                 if use_container == "docker":
                     exec_name = f"fedscale-exec{rank_id}-{time_stamp}"
                     print(f'Starting executor container {exec_name} on {worker}')
