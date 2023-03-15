@@ -24,6 +24,7 @@ parser.add_argument('--executor_configs', type=str,
 # Note: In async mode, the num_participants param is treated as the async buffer size. In sync, this is the number
 # of clients that are selected each round.
 parser.add_argument('--num_participants', type=int, default=4)
+parser.add_argument('--total_participants', type=int, default=4)
 parser.add_argument('--data_map_file', type=str, default=None)
 parser.add_argument('--use_cuda', type=str, default='True')
 parser.add_argument('--cuda_device', type=str, default=None)
