@@ -46,7 +46,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
             'cpu')
 
         # ======== env information ========
-        self.this_rank = 0
+        self.this_rank = args.this_rank
         self.global_virtual_clock = 0.
         self.round_duration = 0.
         self.resource_manager = ResourceManager(self.experiment_mode)
@@ -825,7 +825,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         response = job_api_pb2.ServerResponse(event=current_event,
                                               meta=response_msg, data=response_data)
         if current_event != commons.DUMMY_EVENT:
-            logging.info(f"Issue EVENT ({current_event}) to EXECUTOR ({executor_id})")
+            logging.info(f"Issue EVENT ({current_event}) by AGGREGATOR ({self.this_rank}) to EXECUTOR ({executor_id})")
 
         return response
 

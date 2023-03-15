@@ -8,7 +8,7 @@ ps_ip: localhost
 # Note that if we collocate ps and worker on same GPU, then we need to decrease this number of available processes on that GPU by 1
 # E.g., master node has 4 available processes, then 1 for the ps, and worker should be set to: worker:3
 worker_ips:
-    - localhost:[4]
+    - localhost:[2]
 
 exp_path: $FEDSCALE_HOME/fedscale/cloud
 
