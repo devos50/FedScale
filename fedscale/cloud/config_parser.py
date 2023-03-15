@@ -57,6 +57,7 @@ parser.add_argument('--embedding_file', type=str,
                     default='glove.840B.300d.txt')
 parser.add_argument('--input_shape', type=int, nargs='+', default=[1, 3, 28, 28])
 parser.add_argument('--save_checkpoint', type=bool, default=False)
+parser.add_argument('--checkpoint_interval', type=int, default=10)
 
 
 # The configuration of different hyper-parameters for training

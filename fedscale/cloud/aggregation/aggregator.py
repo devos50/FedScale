@@ -502,9 +502,10 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         """
         self.global_virtual_clock += self.round_duration
 
-        time_str = "%d" % int(self.global_virtual_clock)
-        model_path = os.path.join(logger.logDir, 'model_' + str(self.args.this_rank) + "_" + time_str + ".npy")
-        torch.save(self.model_wrapper.model.state_dict(), model_path)
+        if self.round % self.args.checkpoint_interval == 0:
+            time_str = "%d" % int(self.global_virtual_clock)
+            model_path = os.path.join(logger.logDir, 'model_' + str(self.args.this_rank) + "_" + time_str + ".npy")
+            torch.save(self.model_wrapper.model.state_dict(), model_path)
 
         self.round += 1
         last_round_avg_util = sum(self.stats_util_accumulator) / max(1, len(self.stats_util_accumulator))
