@@ -214,6 +214,10 @@ class ClientManager:
 
         clients_online = self.getFeasibleClients(cur_time)
 
+        if self.args.parallel_sessions > 1:
+            # Only consider clients in the same group
+            clients_online = [client_id for client_id in clients_online if client_id % self.args.parallel_sessions == self.args.this_rank]
+
         if len(clients_online) <= num_of_clients:
             return clients_online
 

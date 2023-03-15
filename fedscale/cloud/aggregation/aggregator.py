@@ -2,7 +2,6 @@
 import collections
 import copy
 import math
-import os
 import pickle
 import random
 import threading
@@ -13,7 +12,6 @@ import grpc
 import numpy as np
 import torch
 import wandb
-from torch.utils.tensorboard import SummaryWriter
 
 import fedscale.cloud.channels.job_api_pb2_grpc as job_api_pb2_grpc
 import fedscale.cloud.logger.aggregator_logging as logger
@@ -503,6 +501,11 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         broadcast new tasks for executors and select clients for next round.
         """
         self.global_virtual_clock += self.round_duration
+
+        time_str = "%d" % int(self.global_virtual_clock)
+        model_path = os.path.join(logger.logDir, 'model_' + str(self.args.this_rank) + "_" + time_str + ".npy")
+        torch.save(self.model_wrapper.model.get_state_dict(), model_path)
+
         self.round += 1
         last_round_avg_util = sum(self.stats_util_accumulator) / max(1, len(self.stats_util_accumulator))
         # assign avg reward to explored, but not ran workers

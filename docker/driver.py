@@ -3,13 +3,11 @@
 import datetime
 import os
 import pickle
-import random
 import shlex
 import subprocess
 import sys
 import time
 import json
-from typing import Dict
 import yaml
 import socket
 
@@ -105,7 +103,9 @@ def process_cmd(yaml_file, local=False):
         exit(1)
 
     # =========== Submit job to parameter server ============
+    parallel_sessions = job_conf["parallel_sessions"]
     running_vms.add(ps_ip)
+    ps_cmds = []
     if use_container == "docker":
         # store ip, port of each container
         ctnr_dict = dict()
@@ -117,24 +117,31 @@ def process_cmd(yaml_file, local=False):
         }
         print(f"Starting aggregator container {ps_name} on {ps_ip}...")
         ps_cmd = f" docker run -i --name {ps_name} --network {yaml_conf['container_network']} -p {ports[0]}:30000 --mount type=bind,source={yaml_conf['data_path']},target=/FedScale/benchmark fedscale/fedscale-aggr"
+        ps_cmds.append(ps_cmd)
     else:
-        print(f"Starting aggregator on {ps_ip}...")
-        ps_cmd = f" python3 {yaml_conf['exp_path']}/{yaml_conf['aggregator_entry']} {conf_script} --this_rank=0 --num_executors={total_gpu_processes} --executor_configs='{executor_configs}' "
-        print("Aggregator command: %s" % ps_cmd)
+        # TODO we only support multiple, parallel aggregators in a non-container environment
+        for session_id in range(parallel_sessions):
+            ps_port = 29500 + session_id
+            print(f"Starting aggregator on {ps_ip}:{ps_port}...")
+            ps_cmd = f" python3 {yaml_conf['exp_path']}/{yaml_conf['aggregator_entry']} {conf_script} --this_rank={session_id} --ps_port={ps_port} --num_executors={total_gpu_processes} --executor_configs='{executor_configs}' "
+            print("Aggregator command: %s" % ps_cmd)
+            ps_cmds.append(ps_cmd)
 
     with open(f"{job_name}_logging", 'wb') as fout:
         pass
 
     with open(f"{job_name}_logging", 'a') as fout:
-        if local:
-            subprocess.Popen(f'{ps_cmd}', shell=True, stdout=fout, stderr=fout)
-        else:
-            subprocess.Popen(f'ssh {submit_user}{ps_ip} "{setup_cmd} {ps_cmd}"',
-                             shell=True, stdout=fout, stderr=fout)
+        for ps_cmd in ps_cmds:
+            if local:
+                subprocess.Popen(f'{ps_cmd}', shell=True, stdout=fout, stderr=fout)
+            else:
+                subprocess.Popen(f'ssh {submit_user}{ps_ip} "{setup_cmd} {ps_cmd}"',
+                                 shell=True, stdout=fout, stderr=fout)
 
     time.sleep(10)
     # =========== Submit job to each worker ============
     rank_id = 1
+    worker_cmds = []
     for worker, gpu in zip(worker_ips, total_gpus):
         running_vms.add(worker)
 
@@ -155,18 +162,25 @@ def process_cmd(yaml_file, local=False):
                     }
 
                     worker_cmd = f" docker run -i --name fedscale-exec{rank_id}-{time_stamp} --network {yaml_conf['container_network']} -p {ports[rank_id]}:32000 --mount type=bind,source={yaml_conf['data_path']},target=/FedScale/benchmark fedscale/fedscale-exec"
+                    worker_cmds.append(worker_cmd)
                 else:
-                    worker_cmd = f" python3 {yaml_conf['exp_path']}/{yaml_conf['executor_entry']} {conf_script} --this_rank={rank_id} --num_executors={total_gpu_processes} --cuda_device=cuda:{cuda_id} "
+                    for session_id in range(parallel_sessions):
+                        # TODO we need support for multiple executors connecting to the same aggregator
+                        ps_port = 29500 + session_id
+                        worker_cmd = f" python3 {yaml_conf['exp_path']}/{yaml_conf['executor_entry']} {conf_script} --this_rank={rank_id} --ps_port={ps_port} --num_executors={total_gpu_processes} --cuda_device=cuda:{cuda_id} "
+                        print("Executor command: %s" % worker_cmd)
+                        worker_cmds.append(worker_cmd)
                 rank_id += 1
 
                 with open(f"{job_name}_logging", 'a') as fout:
                     time.sleep(2)
-                    if local:
-                        subprocess.Popen(f'{worker_cmd}',
-                                         shell=True, stdout=fout, stderr=fout)
-                    else:
-                        subprocess.Popen(f'ssh {submit_user}{worker} "{setup_cmd} {worker_cmd}"',
-                                         shell=True, stdout=fout, stderr=fout)
+                    for worker_cmd in worker_cmds:
+                        if local:
+                            subprocess.Popen(f'{worker_cmd}',
+                                             shell=True, stdout=fout, stderr=fout)
+                        else:
+                            subprocess.Popen(f'ssh {submit_user}{worker} "{setup_cmd} {worker_cmd}"',
+                                             shell=True, stdout=fout, stderr=fout)
 
     # dump the address of running workers
     current_path = os.path.dirname(os.path.abspath(__file__))

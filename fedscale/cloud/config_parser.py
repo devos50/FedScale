@@ -89,6 +89,8 @@ parser.add_argument('--yogi_tau', type=float, default=1e-8)
 parser.add_argument('--yogi_beta', type=float, default=0.9)
 parser.add_argument('--yogi_beta2', type=float, default=0.99)
 
+# For KD
+parser.add_argument('--parallel_sessions', type=int, default=1)
 
 # for prox
 parser.add_argument('--proxy_mu', type=float, default=0.1)
