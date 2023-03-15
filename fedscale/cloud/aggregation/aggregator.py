@@ -531,7 +531,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
          flatten_client_duration) = self.tictak_client_tasks(
             self.sampled_participants, self.args.num_participants)
 
-        logging.info(f"Selected participants to run: {clients_to_run}")
+        logging.info(f"Selected participants to run: {clients_to_run} (round duration: {round_duration})")
 
         # Issue requests to the resource manager; Tasks ordered by the completion time
         self.resource_manager.register_tasks(clients_to_run)
