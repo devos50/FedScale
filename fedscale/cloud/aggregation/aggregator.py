@@ -605,6 +605,13 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         self.log_writer.add_scalar('Test/time_to_test_accuracy (min)', self.testing_history['perf'][self.round]['top_1'],
                                    self.global_virtual_clock / 60.)
 
+        if self.wandb != None:
+            self.wandb.log({
+                'Test/round_to_top1_accuracy': self.testing_history['perf'][self.round]['top_1'],
+                'Test/round_to_top5_accuracy': self.testing_history['perf'][self.round]['top_5'],
+                'Test/round_to_loss': self.testing_history['perf'][self.round]['loss'],
+            }, step=self.round)
+
     def save_model(self):
         """Save model to the wandb server if enabled
         
