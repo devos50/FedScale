@@ -123,7 +123,8 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
                     "eval_interval": args.eval_interval,
                     "rounds": args.rounds,
                     "batch_size": args.batch_size,
-                    "use_cuda": args.use_cuda
+                    "use_cuda": args.use_cuda,
+                    "sample_mode": args.sample_mode,
                 })
             else:
                 logging.error("Warning: wandb has already been initialized")
