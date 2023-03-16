@@ -6,6 +6,7 @@ import pickle
 import random
 import threading
 import time
+from collections import defaultdict
 from concurrent import futures
 
 import grpc
@@ -95,6 +96,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         self.stats_util_accumulator = []
         self.loss_accumulator = []
         self.client_training_results = []
+        self.trained_on = defaultdict(int)
 
         # number of registered executors
         self.registered_executor_info = set()
@@ -428,6 +430,9 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         self.stats_util_accumulator.append(results['utility'])
         self.loss_accumulator.append(results['moving_loss'])
 
+        for key in results['trained_on']:
+            self.trained_on[key] += results['trained_on'][key]
+
         self.client_manager.register_feedback(results['client_id'], results['utility'],
                                               auxi=math.sqrt(
                                                   results['moving_loss']),
@@ -520,6 +525,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         avg_loss = sum(self.loss_accumulator) / max(1, len(self.loss_accumulator))
         logging.info(f"Wall clock: {round(self.global_virtual_clock)} s, round: {self.round}, Planned participants: " +
                      f"{len(self.sampled_participants)}, Succeed participants: {len(self.stats_util_accumulator)}, Training loss: {avg_loss}")
+        logging.info(f"So far, model has been trained on: {dict(self.trained_on)}")
 
         # dump round completion information to tensorboard
         if len(self.loss_accumulator):

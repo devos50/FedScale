@@ -1,6 +1,7 @@
 import logging
 import math
 import time
+from collections import defaultdict
 
 import torch
 from torch.autograd import Variable
@@ -66,9 +67,12 @@ class TorchClient(ClientBase):
 
         # NOTE: If one may hope to run fixed number of epochs, instead of iterations,
         # use `while self.completed_steps < conf.local_steps * len(client_data)` instead
+        trained_on = defaultdict(int)
         while self.completed_steps < conf.local_steps:
             try:
-                self.train_step(client_data, conf, model, optimizer, criterion)
+                trained_on_step = self.train_step(client_data, conf, model, optimizer, criterion)
+                for key in trained_on_step:
+                    trained_on[key] += trained_on_step[key]
             except Exception as ex:
                 error_type = ex
                 break
@@ -78,7 +82,7 @@ class TorchClient(ClientBase):
                        for p in state_dicts}
         results = {'client_id': client_id, 'moving_loss': self.epoch_train_loss,
                    'trained_size': self.completed_steps * conf.batch_size,
-                   'success': self.completed_steps == conf.local_steps}
+                   'success': self.completed_steps == conf.local_steps, 'trained_on': dict(trained_on)}
 
         if error_type is None:
             logging.info(f"Training of (CLIENT: {client_id}) completes, {results}")
@@ -140,7 +144,7 @@ class TorchClient(ClientBase):
         return criterion
 
     def train_step(self, client_data, conf, model, optimizer, criterion):
-
+        trained_on = {}
         for data_pair in client_data:
             if conf.task == 'nlp':
                 (data, _) = data_pair
@@ -157,6 +161,11 @@ class TorchClient(ClientBase):
                 data = temp_data[0:4]
             else:
                 (data, target) = data_pair
+                for t in target:
+                    i = t.item()  # Tensor -> int
+                    if i not in trained_on:
+                        trained_on[i] = 0
+                    trained_on[i] += 1
 
             if conf.task == "detection":
                 self.im_data.resize_(data[0].size()).copy_(data[0])
@@ -243,6 +252,8 @@ class TorchClient(ClientBase):
 
             if self.completed_steps == conf.local_steps:
                 break
+
+        return trained_on
 
     @overrides
     def test(self, client_data, model, conf):
