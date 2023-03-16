@@ -90,19 +90,48 @@ class DataPartitioner(object):
         for idx in range(sample_id):
             self.partitions[client_id_maps[idx]].append(idx)
 
-    def partition_data_helper(self, num_clients, data_map_file=None):
+    def partition_data_helper(self, num_clients, data_map_file=None,
+                              partition_method: str = "uniform", dirichlet_alpha: float = 1.0):
 
         # read mapping file to partition trace
         if data_map_file is not None:
             self.trace_partition(data_map_file)
+        elif partition_method == "dirichlet":
+            self.dirichlet_partition(num_clients=num_clients, alpha=dirichlet_alpha)
         else:
             self.uniform_partition(num_clients=num_clients)
+
+    def dirichlet_partition(self, num_clients, alpha: float):
+        logging.info(f"Dirichlet partitioning data with {self.getNumOfLabels()} labels, {self.getDataLen()} samples...")
+        self.partitions = [None] * num_clients
+        num_classes = self.getNumOfLabels()
+        split_arr = np.random.dirichlet([alpha] * num_clients, num_classes)
+        for cls_idx in range(num_classes):
+            idx = np.where(np.asarray(self.data.targets) == cls_idx)[0]
+            totaln = idx.shape[0]
+            idx_start = 0
+            for i in range(num_clients):
+                if i == num_clients - 1:
+                    cur_idx = idx[idx_start:]
+                else:
+                    idx_end = idx_start + int(split_arr[cls_idx][i] * totaln)
+                    cur_idx = idx[idx_start: idx_end]
+                    idx_start = idx_end
+                if cur_idx == ():
+                    continue
+                if self.partitions[i] is None:
+                    self.partitions[i] = cur_idx
+                else:
+                    self.partitions[i] = np.r_[(self.partitions[i], cur_idx)]
+
+        for i in range(len(self.partitions)):
+            self.partitions[i] = list(self.partitions[i])
 
     def uniform_partition(self, num_clients):
         # random partition
         numOfLabels = self.getNumOfLabels()
         data_len = self.getDataLen()
-        logging.info(f"Randomly partitioning data, {data_len} samples...")
+        logging.info(f"Randomly partitioning data with {numOfLabels} labels, {data_len} samples...")
 
         indexes = list(range(data_len))
         self.rng.shuffle(indexes)

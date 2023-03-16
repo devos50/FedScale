@@ -50,3 +50,5 @@ job_conf:
     - save_checkpoint: False
     - checkpoint_interval: 100
     - parallel_sessions: 1
+    - partition_method: dirichlet
+    - dirichlet_alpha: 0.1

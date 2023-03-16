@@ -125,7 +125,8 @@ class Executor(object):
         training_sets = DataPartitioner(
             data=train_dataset, args=self.args, numOfClass=self.args.num_class)
         training_sets.partition_data_helper(
-            num_clients=self.args.total_participants, data_map_file=self.args.data_map_file)
+            num_clients=self.args.total_participants, data_map_file=self.args.data_map_file,
+            partition_method=self.args.partition_method, dirichlet_alpha=self.args.dirichlet_alpha)
 
         testing_sets = DataPartitioner(
             data=test_dataset, args=self.args, numOfClass=self.args.num_class, isTest=True)

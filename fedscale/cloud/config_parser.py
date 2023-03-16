@@ -25,6 +25,8 @@ parser.add_argument('--executor_configs', type=str,
 # of clients that are selected each round.
 parser.add_argument('--num_participants', type=int, default=4)
 parser.add_argument('--total_participants', type=int, default=4)
+parser.add_argument('--partition_method', type=str, default="uniform")
+parser.add_argument('--dirichlet_alpha', type=float, default=1.0)
 parser.add_argument('--data_map_file', type=str, default=None)
 parser.add_argument('--use_cuda', type=str, default='True')
 parser.add_argument('--cuda_device', type=str, default=None)
