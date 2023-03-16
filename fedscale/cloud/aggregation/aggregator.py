@@ -672,9 +672,7 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
 
             self.save_model()
 
-            if len(self.loss_accumulator):
-                logging.info("logging test result")
-                self.log_test_result()
+            self.log_test_result()
 
             self.broadcast_events_queue.append(commons.START_ROUND)
 
