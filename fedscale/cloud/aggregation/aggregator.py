@@ -112,8 +112,11 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
                 self.wandb.init(project=f'fedscale-{args.job_name}',
                                 name=f'aggregator{args.this_rank}-{args.time_stamp}',
                                 group=f'{args.time_stamp}')
+                partitioner = "trace" if args.data_map_file else args.partitioner
                 self.wandb.config.update({
                     "num_participants": args.num_participants,
+                    "partitioner": partitioner,
+                    "dirichlet_alpha": args.dirichlet_alpha,
                     "data_set": args.data_set,
                     "model": args.model,
                     "gradient_policy": args.gradient_policy,
