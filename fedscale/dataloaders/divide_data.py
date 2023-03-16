@@ -159,7 +159,7 @@ class DataPartitioner(object):
 def select_dataset(rank, partition, batch_size, args, isTest=False, collate_fn=None):
     """Load data given client Id"""
     partition = partition.use(rank - 1, isTest)
-    dropLast = False if isTest else True
+    dropLast = False if (isTest or len(partition) < batch_size) else True
     if isTest:
         num_loaders = 0
     else:
