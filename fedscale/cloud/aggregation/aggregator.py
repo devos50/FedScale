@@ -517,8 +517,14 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
 
         if self.round % self.args.checkpoint_interval == 0:
             time_str = "%d" % int(self.global_virtual_clock)
-            model_path = os.path.join(logger.logDir, 'model_' + str(self.args.this_rank) + "_" + time_str + ".npy")
+            model_file_name = 'model_' + str(self.args.this_rank) + "_" + time_str + ".npy"
+            model_path = os.path.join(logger.logDir, model_file_name)
             torch.save(self.model_wrapper.model.state_dict(), model_path)
+
+            # Also store the amount of data this model has been trained on
+            with open(os.path.join(logger.logDir, "trained_on.json"), "a") as out_file:
+                json_info = json.dumps({"name": model_file_name, "trained_on": dict(self.trained_on)})
+                out_file.write("%s\n" % json_info)
 
         self.round += 1
         last_round_avg_util = sum(self.stats_util_accumulator) / max(1, len(self.stats_util_accumulator))
