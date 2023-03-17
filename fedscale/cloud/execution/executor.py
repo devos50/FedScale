@@ -13,6 +13,7 @@ import wandb
 
 import fedscale.cloud.channels.job_api_pb2 as job_api_pb2
 import fedscale.cloud.logger.executor_logging as logger
+from fedscale.cloud import get_group_name
 from fedscale.cloud.channels.channel_context import ClientConnections
 from fedscale.cloud.execution.tensorflow_client import TensorflowClient
 from fedscale.cloud.execution.torch_client import TorchClient
@@ -61,8 +62,8 @@ class Executor(object):
             self.wandb = wandb
             if self.wandb.run is None:
                 self.wandb.init(project=f'fedscale-{args.job_name}',
-                                name=f'executor{args.this_rank}-{args.time_stamp}',
-                                group=f'{args.time_stamp}')
+                                name=f'executor{args.this_rank}',
+                                group=get_group_name(args))
             else:
                 logging.error("Warning: wandb has already been initialized")
             

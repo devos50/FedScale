@@ -16,6 +16,7 @@ import wandb
 
 import fedscale.cloud.channels.job_api_pb2_grpc as job_api_pb2_grpc
 import fedscale.cloud.logger.aggregator_logging as logger
+from fedscale.cloud import get_group_name
 from fedscale.cloud.aggregation.optimizers import TorchServerOptimizer
 from fedscale.cloud.channels import job_api_pb2
 from fedscale.cloud.client_manager import ClientManager
@@ -110,10 +111,10 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
             self.wandb = wandb
             if self.wandb.run is None:
                 self.wandb.init(project=f'fedscale-{args.job_name}',
-                                name=f'aggregator{args.this_rank}-{args.time_stamp}',
-                                group=f'{args.time_stamp}')
+                                name=f'aggregator{args.this_rank}',
+                                group=get_group_name(args))
                 partitioner = "trace" if args.data_map_file else args.partition_method
-                self.wandb.config.update({
+                config = {
                     "num_participants": args.num_participants,
                     "partitioner": partitioner,
                     "dirichlet_alpha": args.dirichlet_alpha,
@@ -125,7 +126,10 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
                     "batch_size": args.batch_size,
                     "use_cuda": args.use_cuda,
                     "sample_mode": args.sample_mode,
-                })
+                }
+                if not args.data_map_file:
+                    config["total_participants"] = args.total_participants
+                self.wandb.config.update(config)
             else:
                 logging.error("Warning: wandb has already been initialized")
             # self.wandb.run.name = f'{args.job_name}-{args.time_stamp}'
