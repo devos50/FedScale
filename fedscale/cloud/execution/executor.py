@@ -221,6 +221,7 @@ class Executor(object):
             except grpc.RpcError as rpc_error:
                 logging.error("Received unknown RPC error: %s (attempt %d)", rpc_error, attempt)
                 attempt += 1
+                time.sleep(random.random())
         self.dispatch_worker_events(response)
 
         return client_id, train_res
