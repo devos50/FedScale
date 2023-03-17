@@ -6,6 +6,7 @@ import random
 import time
 from argparse import Namespace
 
+import grpc
 import numpy as np
 import torch
 import wandb
@@ -206,13 +207,20 @@ class Executor(object):
             client_id=client_id, conf=client_conf, model=config['model'])
 
         # Report execution completion meta information
-        response = self.aggregator_communicator.stub.CLIENT_EXECUTE_COMPLETION(
-            job_api_pb2.CompleteRequest(
-                client_id=str(client_id), executor_id=self.executor_id,
-                event=commons.CLIENT_TRAIN, status=True, msg=None,
-                meta_result=None, data_result=None
-            )
-        )
+        attempt = 0
+        while attempt < 5:
+            try:
+                response = self.aggregator_communicator.stub.CLIENT_EXECUTE_COMPLETION(
+                    job_api_pb2.CompleteRequest(
+                        client_id=str(client_id), executor_id=self.executor_id,
+                        event=commons.CLIENT_TRAIN, status=True, msg=None,
+                        meta_result=None, data_result=None
+                    )
+                )
+                break
+            except grpc.RpcError as rpc_error:
+                logging.error("Received unknown RPC error: %s (attempt %d)", rpc_error, attempt)
+                attempt += 1
         self.dispatch_worker_events(response)
 
         return client_id, train_res
