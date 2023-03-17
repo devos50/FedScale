@@ -620,10 +620,10 @@ class Aggregator(job_api_pb2_grpc.JobServiceServicer):
         if parser.args.save_checkpoint and self.last_saved_round < self.round:
             self.last_saved_round = self.round
             np.save(self.temp_model_path, self.model_weights)
-            if self.wandb != None:
-                artifact = self.wandb.Artifact(name='model_'+str(self.this_rank), type='model')
-                artifact.add_file(local_path=self.temp_model_path)
-                self.wandb.log_artifact(artifact)
+            # if self.wandb != None:
+            #     artifact = self.wandb.Artifact(name='model_'+str(self.this_rank), type='model')
+            #     artifact.add_file(local_path=self.temp_model_path)
+            #     self.wandb.log_artifact(artifact)
 
     def deserialize_response(self, responses):
         """Deserialize the response from executor
