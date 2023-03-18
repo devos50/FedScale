@@ -260,6 +260,13 @@ def init_dataset():
             test_dataset = datasets.CIFAR10(parser.args.data_dir, train=False, download=True,
                                             transform=test_transform)
 
+        elif parser.args.data_set == 'cifar100':
+            train_transform, test_transform = get_data_transform('cifar')
+            train_dataset = datasets.CIFAR100(parser.args.data_dir, train=True, download=True,
+                                              transform=train_transform)
+            test_dataset = datasets.CIFAR100(parser.args.data_dir, train=False, download=True,
+                                             transform=test_transform)
+
         elif parser.args.data_set == "imagenet":
             train_transform, test_transform = get_data_transform('imagenet')
             train_dataset = datasets.ImageNet(
