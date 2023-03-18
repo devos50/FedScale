@@ -211,7 +211,7 @@ async def run(args):
                 best_acc = acc
             logger.info("Accuracy of student model after %d epochs: %f, %f (best: %f)", epoch + 1, acc, loss, best_acc)
             time_for_testing += (time.time() - test_start_time)
-            with open(os.path.join("data", "distill_accuracies.csv"), "a") as out_file:
+            with open(os.path.join(args.models_dir, "distill_accuracies.csv"), "a") as out_file:
                 out_file.write("%d,%f,%f,%f,%f,%f\n" % (epoch + 1, acc, loss, best_acc, time.time() - start_time - time_for_testing, time.time() - start_time))
 
 logging.basicConfig(level=logging.INFO)
