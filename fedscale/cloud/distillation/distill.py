@@ -3,22 +3,31 @@ Script to distill from n student models into a teacher model.
 """
 import argparse
 import asyncio
-import json
+import glob
 import logging
 import os
 import time
+from typing import Dict, List
 
 import torch
 from torch import optim
 from torch.utils.data import DataLoader, Dataset
-from torchvision.datasets import CIFAR10, CIFAR100
-import torchvision.models as tormodels
 
+from fedscale.dataloaders.divide_data import DataPartitioner
+from fedscale.dataloaders.femnist import FEMNIST
 from fedscale.dataloaders.utils_data import get_data_transform
-from fedscale.utils.model_test_module import test_pytorch_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("distiller")
+
+device = None
+learning_settings = None
+teacher_models = []
+cohorts: Dict[int, List[int]] = {}
+total_peers: int = 0
+private_testset = None
+weights = None
+distill_timestamp = 0
 
 
 class DatasetWithIndex(Dataset):
@@ -36,137 +45,195 @@ class DatasetWithIndex(Dataset):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('models_dir')
-    parser.add_argument('data_dir')
+    parser.add_argument('root_models_dir')  # The root directory containing the directories with data of individual (cohort) sessions
+    parser.add_argument('models_base_name')  # The base name of the directories with data
+    parser.add_argument('--cohort-file', type=str, default="cohorts.txt")
     parser.add_argument('private_dataset')
     parser.add_argument('public_dataset')
-    parser.add_argument('timestamp', type=int)
-    parser.add_argument('--learning-rate', type=float, default=0.001)
-    parser.add_argument('--momentum', type=float, default=0.9)
+    parser.add_argument('--distill-timestamp', type=int, default=None)  # The timestamp during the experiment at which we distill
+    parser.add_argument('--partitioner', type=str, default="iid")
+    parser.add_argument('--alpha', type=float, default=1)
+    parser.add_argument('--learning-rate', type=float, default=None)
+    parser.add_argument('--momentum', type=float, default=None)
     parser.add_argument('--weight-decay', type=float, default=0)
     parser.add_argument('--batch-size', type=int, default=512)
     parser.add_argument('--student-model', type=str, default=None)
     parser.add_argument('--teacher-model', type=str, default=None)
-    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--acc-check-interval', type=int, default=1)
-    parser.add_argument('--data-dir', type=str, default=os.path.join(os.environ["HOME"], "dfl-data"))
+    parser.add_argument('--check-teachers-accuracy', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--private-data-dir', type=str, default=os.path.join(os.environ["HOME"], "dfl-data"))
+    parser.add_argument('--public-data-dir', type=str, default=os.path.join(os.environ["HOME"], "dfl-data"))
     return parser.parse_args()
 
-trained_on_info = {}
+
+def read_cohorts(args) -> None:
+    global total_peers
+    logger.info("Reading cohort information...")
+
+    # Read the cohort file
+    with open(args.cohort_file) as cohort_file:
+        for cohort_line in cohort_file.readlines():
+            parts = cohort_line.strip().split(",")
+            cohort_index = int(parts[0])
+            cohort_peers = [int(p) for p in parts[1].split("-")]
+            cohorts[cohort_index] = cohort_peers
+            total_peers += len(cohort_peers)
 
 
-def parse_trained_on_info(args):
-    # Read the number of samples each model has been trained on
-    with open(os.path.join(args.models_dir, "trained_on.json"), "r") as trained_on_file:
-        for line in trained_on_file.readlines():
-            if not line:
-                continue
+def read_teacher_models(args):
+    global distill_timestamp
+    logger.info("Reading teacher models...")
 
-            json_info = json.loads(line.strip())
-            if not json_info["trained_on"]:
-                continue
+    model_timestamps: List[int] = []
 
-            model_name = json_info["name"]
-            parts = model_name.split(".")[0].split("_")
-            rank = int(parts[1])
-            timestamp = int(parts[2])
+    # Load the teacher models
+    for cohort_ind in range(len(cohorts.keys())):
+        cohort_models = []
+        dir_name = "%s_c%d" % (args.models_base_name, cohort_ind)
+        data_dir = os.path.join(args.root_models_dir, dir_name)
+        if not os.path.exists(data_dir):
+            raise RuntimeError("Models directory %s does not exist!" % data_dir)
 
-            if rank not in trained_on_info:
-                trained_on_info[rank] = []
-            trained_on_info[rank].append((model_name, timestamp, json_info["trained_on"]))
+        # Gather all models in this directory
+        for full_model_path in glob.glob("%s/*.model" % data_dir):
+            model_name = os.path.basename(full_model_path).split(".")[0]
+            parts = model_name.split("_")
+            model_round = int(parts[0])
+            model_time = int(parts[1])
+            cohort_models.append((model_round, model_time, full_model_path))
 
-    # Sort the arrays in trained_on_info based on the timestamp
-    for key in trained_on_info.keys():
-        trained_on_info[key] = sorted(trained_on_info[key], key=lambda x: x[1])
+        # Sort the models based on their timestamp
+        cohort_models.sort(key=lambda x: x[1])
+
+        # Find the right model given the distillation timestamp
+        if args.distill_timestamp is None:
+            model_to_load = cohort_models[-1][2]
+            model_timestamps.append(cohort_models[-1][1])
+        else:
+            highest_ind = None
+            for ind in range(len(cohort_models)):
+                if highest_ind is None or cohort_models[ind][1] <= args.distill_timestamp:
+                    highest_ind = ind
+
+            model_to_load = cohort_models[highest_ind][2]
+            model_timestamps.append(cohort_models[highest_ind][1])
+
+        logger.info("Using model %s for cohort %d", os.path.basename(model_to_load), cohort_ind)
+        model = create_model(args.private_dataset, architecture=args.teacher_model)
+        model.load_state_dict(torch.load(model_to_load, map_location=torch.device('cpu')))
+        model.to(device)
+        teacher_models.append(model)
+
+        if args.check_teachers_accuracy:
+            # Test accuracy of the teacher model
+            acc, loss = private_testset.test(model, device_name=device)
+            logger.info("Accuracy of teacher model %d: %f, %f", cohort_ind, acc, loss)
+
+    distill_timestamp = args.distill_timestamp if args.distill_timestamp is not None else max(model_timestamps)
 
 
-def get_models_for_timestamp(timestamp):
-    """
-    Get the model information produced at a particular timestamp
-    """
-    results = []
-    for group in trained_on_info.keys():
-        cur_ind = 0
-        if trained_on_info[group][0][1] > timestamp: # No module produced at this time!
-            raise RuntimeError("Group %d produced no model at time %d!" % (group, timestamp))
+def determine_cohort_weights(args):
+    global weights
 
-        while True:
-            if trained_on_info[group][cur_ind][1] > timestamp:
-                results.append(trained_on_info[group][cur_ind - 1])
-                break
-            cur_ind += 1
+    logger.info("Determining cohort weights...")
 
-            if cur_ind == len(trained_on_info[group]):
-                results.append(trained_on_info[group][cur_ind - 1])
-                break
+    # Determine the class distribution per cohort
+    full_settings = SessionSettings(
+        dataset=args.private_dataset,
+        work_dir="",
+        learning=learning_settings,
+        participants=["a"],
+        all_participants=["a"],
+        target_participants=total_peers,
+        partitioner=args.partitioner,
+        alpha=args.alpha,
+    )
 
-    return results
+    if full_settings.dataset in ["cifar10", "mnist"]:
+        train_dir = args.private_dataset
+    else:
+        train_dir = os.path.join(args.private_data_dir, "per_user_data", "train")
 
+    # Get the number of classes in the dataset
+    dataset = create_dataset(full_settings, 0, train_dir=train_dir)
 
-async def run(args):
-    # Initialize settings
-    device = "cpu" if not torch.cuda.is_available() else "cuda:0"
-
-    with open(os.path.join(args.models_dir, "distill_accuracies.csv"), "w") as out_file:
-        out_file.write("epoch,accuracy,loss,best_acc,train_time,total_time\n")
-
-    parse_trained_on_info(args)
-
-    models_info = get_models_for_timestamp(args.timestamp)
-    total_per_class = [0] * 10
-    for model_info in models_info:
-        for cls_label, cls_cnt in model_info[2].items():
-            total_per_class[int(cls_label)] += cls_cnt
-
-    print("Total items per class: %s" % total_per_class)
-
+    grouped_samples_per_class = []
     weights = []
-    for model_info in models_info:
-        weights_this_group = [None] * 10
-        for cls_label, cls_cnt in model_info[2].items():
-            weights_this_group[int(cls_label)] = cls_cnt / total_per_class[int(cls_label)]
+    total_per_class = [0] * dataset.get_num_classes()
+    for cohort_ind in range(len(cohorts.keys())):
+        samples_per_class = [0] * dataset.get_num_classes()
+        for peer_id in cohorts[cohort_ind]:
+            start_time = time.time()
+
+            dataset = create_dataset(full_settings, peer_id, train_dir=train_dir)
+            print("Creating dataset for peer %d took %f sec." % (peer_id, time.time() - start_time))
+            for a, (b, clsses) in enumerate(dataset.get_trainset(500, shuffle=False)):
+                for cls in clsses:
+                    samples_per_class[cls] += 1
+                    total_per_class[cls] += 1
+        print("Samples per class for cohort %d: %s" % (cohort_ind, samples_per_class))
+        grouped_samples_per_class.append(samples_per_class)
+
+    print("Total per class: %s" % total_per_class)
+    for cohort_ind in range(len(cohorts.keys())):
+        weights_this_group = [grouped_samples_per_class[cohort_ind][i] / total_per_class[i] for i in range(dataset.get_num_classes())]
         weights.append(weights_this_group)
+        print("Weights for cohort %d: %s" % (cohort_ind, weights_this_group))
 
     weights = torch.Tensor(weights)
     weights = weights.to(device)
 
+
+async def run(args):
+    global device, learning_settings, private_testset
+
+    # Set the learning parameters if they are not set already
+    if args.learning_rate is None:
+        if args.public_dataset == "cifar100":
+            args.learning_rate = 0.001
+            args.momentum = 0.9
+        elif args.public_dataset == "mnist":
+            args.learning_rate = 0.001
+            args.momentum = 0
+        else:
+            raise RuntimeError("Unknown public dataset - unable set learning rate")
+
+    # TODO just for testing, how to use fedscale to make the train set
+    train_transform, test_transform = get_data_transform('mnist')
+    train_dataset = FEMNIST(args.private_data_dir, dataset='train', transform=train_transform)
+    test_dataset = FEMNIST(args.private_data_dir, dataset='test', transform=test_transform)
+
+    training_sets = DataPartitioner(data=train_dataset, args=args, numOfClass=62)
+    training_sets.partition_data_helper(num_clients=100)
+
+    read_cohorts(args)
+
+    logger.info("Cohorts: %d, peers: %d" % (len(cohorts.keys()), total_peers))
+
+    # Initialize settings
+    device = "cpu" if not torch.cuda.is_available() else "cuda:0"
+
+    if not os.path.exists("data"):
+        os.mkdir("data")
+
     start_time = time.time()
     time_for_testing = 0  # Keep track of the time we spend on testing - we want to exclude this
 
-    # Load the private testset and public dataset
-    train_transform, test_transform = get_data_transform('cifar')
-    test_dataset = CIFAR10(args.data_dir, train=False, download=True, transform=test_transform)
-    test_loader = DataLoader(test_dataset, args.batch_size)
+    read_teacher_models(args)
 
-    cifar100_dataset = CIFAR100(args.data_dir, train=True, download=True, transform=train_transform)
-    cifar100_loader = DataLoader(cifar100_dataset, batch_size=args.batch_size, shuffle=False)
-
-    # Load the teacher models
-    teacher_models = []
-    for model_info in models_info:
-        model_name = model_info[0]
-        model_path = os.path.join(args.models_dir, model_name)
-        if not os.path.exists(model_path):
-            raise RuntimeError("Could not find student model at location %s!" % model_path)
-
-        model = tormodels.__dict__['shufflenet_v2_x2_0'](num_classes=10)
-        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-        model.to(device)
-        teacher_models.append(model)
-
-        # Test accuracy of the teacher model
-        test_loss, acc, acc_5, test_results = test_pytorch_model(0, model, test_loader, device=device)
-        logger.info("Accuracy of teacher model %s: %f, %f", model_info[0], acc, test_loss)
+    determine_cohort_weights(args)
 
     # Create the student model
-    student_model = tormodels.__dict__['shufflenet_v2_x2_0'](num_classes=10)
+    student_model = create_model(args.private_dataset, architecture=args.student_model)
     student_model.to(device)
 
-    # Generate the logits
+    # Generate the prediction logits that we will use to train the student model
     logits = []
     for teacher_ind, teacher_model in enumerate(teacher_models):
+        logger.info("Inferring outputs for cohort %d model", teacher_ind)
         teacher_logits = []
-        for i, (images, _) in enumerate(cifar100_loader):
+        for i, (images, _) in enumerate(public_dataset_loader):
             images = images.to(device)
             with torch.no_grad():
                 out = teacher_model.forward(images).detach()
@@ -174,24 +241,27 @@ async def run(args):
             teacher_logits += out
 
         logits.append(teacher_logits)
-        print("Inferred %d outputs for teacher model %d" % (len(teacher_logits), teacher_ind))
+        logger.info("Inferred %d outputs for teacher model %d", len(teacher_logits), teacher_ind)
 
     # Aggregate the logits
-    print("Aggregating logits...")
+    logger.info("Aggregating logits...")
     aggregated_predictions = []
     for sample_ind in range(len(logits[0])):
-        predictions = [logits[n][sample_ind] for n in range(len(teacher_models))]
+        predictions = [logits[n][sample_ind] for n in range(len(cohorts.keys()))]
         aggregated_predictions.append(torch.sum(torch.stack(predictions), dim=0))
 
     # Reset loader
-    cifar100_loader = DataLoader(dataset=DatasetWithIndex(cifar100_loader.dataset), batch_size=args.batch_size, shuffle=True)
+    public_dataset_loader = DataLoader(dataset=DatasetWithIndex(public_dataset.trainset), batch_size=args.batch_size, shuffle=True)
+
+    with open(os.path.join("data", "distill_accuracies_%d.csv" % distill_timestamp), "w") as out_file:
+        out_file.write("distill_time,epoch,accuracy,loss,best_acc,train_time,total_time\n")
 
     # Distill \o/
     optimizer = optim.Adam(student_model.parameters(), lr=args.learning_rate, betas=(args.momentum, 0.999), weight_decay=args.weight_decay)
     criterion = torch.nn.L1Loss(reduce=True)
     best_acc = 0
     for epoch in range(args.epochs):
-        for i, (images, _, indices) in enumerate(cifar100_loader):
+        for i, (images, _, indices) in enumerate(public_dataset_loader):
             images = images.to(device)
 
             student_model.train()
@@ -206,13 +276,13 @@ async def run(args):
         # Compute the accuracy of the student model
         if epoch % args.acc_check_interval == 0:
             test_start_time = time.time()
-            loss, acc, acc_5, test_results = test_pytorch_model(0, student_model, test_loader, device=device)
+            acc, loss = private_testset.test(student_model, device_name=device)
             if acc > best_acc:
                 best_acc = acc
             logger.info("Accuracy of student model after %d epochs: %f, %f (best: %f)", epoch + 1, acc, loss, best_acc)
             time_for_testing += (time.time() - test_start_time)
-            with open(os.path.join(args.models_dir, "distill_accuracies.csv"), "a") as out_file:
-                out_file.write("%d,%f,%f,%f,%f,%f\n" % (epoch + 1, acc, loss, best_acc, time.time() - start_time - time_for_testing, time.time() - start_time))
+            with open(os.path.join("data", "distill_accuracies_%d.csv" % distill_timestamp), "a") as out_file:
+                out_file.write("%d,%d,%f,%f,%f,%f,%f\n" % (distill_timestamp, epoch + 1, acc, loss, best_acc, time.time() - start_time - time_for_testing, time.time() - start_time))
 
 logging.basicConfig(level=logging.INFO)
 loop = asyncio.get_event_loop()
